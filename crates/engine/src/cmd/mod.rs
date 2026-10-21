@@ -454,28 +454,24 @@ pub fn now_iso() -> String {
 }
 
 /// Days since 1970-01-01 → (year, month, day).
+///
+/// `NaiveDate` only covers about ±262143 years, but this is reached by the system clock (and by
+/// [`iso_from_unix_secs`] for a `u64` seconds count past it), so it must stay exact for every
+/// `z`. The Gregorian calendar repeats every 400 years (146_097 days): chrono converts the day
+/// within its cycle and whole cycles go back into the year (an i128 so i64::MIN/MAX can't
+/// overflow). 1970-01-01 is `num_days_from_ce` 719_163, and 0..146_097 days from CE day 0 always
+/// fit chrono. The result matches the proleptic Gregorian count the old hand-rolled code gave.
 pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    // `NaiveDate` counts from 0001-01-01 (day 1); day 719_162 is 1970-01-01.
-    match z.checked_add(719_163).and_then(|n| i32::try_from(n).ok()).and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
-        Some(d) => (i64::from(chrono::Datelike::year(&d)), chrono::Datelike::month(&d), chrono::Datelike::day(&d)),
-        // Out of chrono's range (year 0 or > 262143): keep the proleptic Gregorian answer the
-        // old algorithm gave, computed without a date type.
-        None => civil_fallback(z),
+    use chrono::Datelike;
+    let (cycles, rest) = (z.div_euclid(146_097), z.rem_euclid(146_097));
+    match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => {
+            let y = i128::from(d.year()) + i128::from(cycles) * 400;
+            (i64::try_from(y).unwrap_or(if y < 0 { i64::MIN } else { i64::MAX }), d.month(), d.day())
+        }
+        // Unreachable: `rest + 719_163` is 719_163..865_259, always a valid CE day.
+        None => (1970, 1, 1),
     }
-}
-
-/// Days since 1970-01-01 → (year, month, day) for values outside `NaiveDate`'s range.
-fn civil_fallback(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 /// Story given in params (`"story": "body"` / `{"part": 3}`), else the caret's.
@@ -503,7 +499,7 @@ pub fn default_lang(s: &Session) -> Option<String> {
 
 #[cfg(test)]
 mod iso_tests {
-    use super::iso_from_unix_secs;
+    use super::{civil_from_days, iso_from_unix_secs};
 
     #[test]
     fn formats_epoch_and_known_timestamps() {
@@ -519,10 +515,24 @@ mod iso_tests {
     }
 
     #[test]
-    fn formats_dates_outside_chronos_range_via_civil_fallback() {
+    fn formats_dates_outside_chronos_range() {
         // Year 10000 is still inside chrono's range: a plain zero-padded year, no leading `+`.
         assert_eq!(iso_from_unix_secs(253_402_300_800), "10000-01-01T00:00:00Z");
         // Past chrono's range, keep the proleptic Gregorian date instead of the Unix epoch.
         assert_eq!(iso_from_unix_secs(10_000_000_000_000), "318857-05-20T17:46:40Z");
+    }
+
+    #[test]
+    fn civil_from_days_is_exact_beyond_chronos_range() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(20_734), (2026, 10, 8));
+        // Past `NaiveDate`'s ±262143 the 400-year cycles carry the year; values from the
+        // pre-chrono formula, both directions, both sides of the epoch.
+        assert_eq!(civil_from_days(95_026_602), (262_144, 1, 1));
+        assert_eq!(civil_from_days(99_000_000), (273_022, 10, 18));
+        assert_eq!(civil_from_days(-96_465_964), (-262_145, 3, 1));
+        assert_eq!(civil_from_days(-99_000_000), (-269_083, 3, 17));
+        // The extremes must not overflow or panic (i128 intermediates).
+        let _ = (civil_from_days(i64::MAX), civil_from_days(i64::MIN));
     }
 }
