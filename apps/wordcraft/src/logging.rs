@@ -448,7 +448,10 @@ mod tests {
         // Past chrono's range (a clock set absurdly far ahead) keeps the proleptic Gregorian date
         // the old formatter gave, rather than falling back to the epoch. FredApps' counterexample:
         // UNIX_EPOCH + 10_000_000_000_000 s was 318857-05-20T17:46:40.000Z and must stay so.
-        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(10_000_000_000_000)), "318857-05-20T17:46:40.000Z");
+        // Windows' SystemTime holds only up to about year 30828, so this is checked where it fits.
+        if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(10_000_000_000_000)) {
+            assert_eq!(timestamp(far), "318857-05-20T17:46:40.000Z");
+        }
         // Windows' SystemTime can't hold u64::MAX / 2 seconds, so it is only checked where it exists.
         if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::MAX / 2)) {
             assert_eq!(timestamp(far), "292277026596-12-04T15:30:07.000Z");
