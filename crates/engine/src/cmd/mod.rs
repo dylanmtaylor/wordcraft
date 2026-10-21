@@ -420,8 +420,17 @@ fn split_para_as(s: &mut Session, at: &Pos, enter: bool) -> Result<Pos, CmdError
 
 /// ISO-8601 timestamp (UTC, seconds) for `secs` since the Unix epoch.
 pub fn iso_from_unix_secs(secs: u64) -> String {
-    let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
-    t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    use chrono::Datelike;
+    let t = secs % 86_400;
+    let hms = format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60);
+    // Within chrono's range, read the date from it; past it, keep the proleptic Gregorian answer
+    // `civil_from_days` gives rather than falling back to the epoch.
+    let (y, m, d) = match i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)) {
+        Some(dt) => (i64::from(dt.year()), dt.month(), dt.day()),
+        None => civil_from_days((secs / 86_400) as i64),
+    };
+    // `{y:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{y:04}-{m:02}-{d:02}T{hms}Z")
 }
 
 /// Seconds since the Unix epoch (UTC): the system clock, or the browser's on the web.
@@ -507,5 +516,13 @@ mod iso_tests {
         assert_eq!(iso_from_unix_secs(1_709_164_800), "2024-02-29T00:00:00Z");
         assert_eq!(iso_from_unix_secs(951_782_400), "2000-02-29T00:00:00Z");
         assert_eq!(iso_from_unix_secs(1_735_689_599), "2024-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn formats_dates_outside_chronos_range_via_civil_fallback() {
+        // Year 10000 is still inside chrono's range: a plain zero-padded year, no leading `+`.
+        assert_eq!(iso_from_unix_secs(253_402_300_800), "10000-01-01T00:00:00Z");
+        // Past chrono's range, keep the proleptic Gregorian date instead of the Unix epoch.
+        assert_eq!(iso_from_unix_secs(10_000_000_000_000), "318857-05-20T17:46:40Z");
     }
 }

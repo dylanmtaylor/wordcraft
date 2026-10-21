@@ -87,6 +87,8 @@ fn parse(bytes: &[u8]) -> Option<CoreProps> {
     })
 }
 
+/// A `VT_FILETIME` property value as an ISO-8601 UTC string (`YYYY-MM-DDTHH:MM:SSZ`), or `None`
+/// if it is not a FILETIME, is zero, or predates the 1601 FILETIME epoch.
 fn filetime_iso(value: &[u8]) -> Option<String> {
     let kind = u32_at(value, 0)?;
     if kind != 64 {
@@ -102,7 +104,8 @@ fn filetime_iso(value: &[u8]) -> Option<String> {
     let unix_100ns = ft.checked_sub(EPOCH_DIFFERENCE)?;
     let unix_secs = i64::try_from(unix_100ns / 10_000_000).ok()?;
     let t = chrono::DateTime::from_timestamp(unix_secs, 0)?;
-    Some(t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    Some(format!("{:04}-{}", chrono::Datelike::year(&t), t.format("%m-%dT%H:%M:%SZ")))
 }
 
 fn text(value: &[u8], codepage: u16) -> Option<String> {
@@ -153,6 +156,8 @@ mod tests {
         // 2020-01-01T00:00:00Z and the same day at 13:45:09.
         assert_eq!(filetime_iso(&value(132_223_104_000_000_000)).as_deref(), Some("2020-01-01T00:00:00Z"));
         assert_eq!(filetime_iso(&value(132_223_599_090_000_000)).as_deref(), Some("2020-01-01T13:45:09Z"));
+        // Year 10000 keeps the plain zero-padded year (no leading `+` that chrono's `%Y` would add).
+        assert_eq!(filetime_iso(&value(2_650_467_744_000_000_000)).as_deref(), Some("10000-01-01T00:00:00Z"));
         // Zero, a non-FILETIME kind and times before the 1601 epoch are rejected, not a panic.
         assert_eq!(filetime_iso(&value(0)), None);
         assert_eq!(filetime_iso(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), None);

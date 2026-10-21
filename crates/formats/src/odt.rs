@@ -792,8 +792,10 @@ fn join_deleted_marks(blocks: &[FBlock]) -> Option<(Vec<FBlock>, HashMap<usize, 
 
 /// Now, as an `xsd:dateTime` (UTC).
 fn now_iso() -> String {
+    use chrono::Datelike;
     let t = chrono::DateTime::from_timestamp(now_unix(), 0).unwrap_or_default();
-    t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{:04}-{}", t.year(), t.format("%m-%dT%H:%M:%SZ"))
 }
 
 /// Seconds since the Unix epoch: the system clock, or the browser's on the web.
