@@ -762,7 +762,7 @@ fn serial_date(serial: f64, date1904: bool, kind: DateKind) -> Option<String> {
 /// every 400 years (146_097 days), so this stays exact for any `z` without hand-rolled calendar
 /// math: chrono converts the day within its cycle and whole cycles go back into the year (an
 /// i128 so the extremes can't overflow). 1970-01-01 is `num_days_from_ce` 719_163.
-fn civil(z: i64) -> (i64, i64, i64) {
+pub(crate) fn civil(z: i64) -> (i64, i64, i64) {
     use chrono::Datelike;
     let (cycles, rest) = (z.div_euclid(146_097), z.rem_euclid(146_097));
     match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {

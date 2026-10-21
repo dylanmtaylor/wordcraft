@@ -447,6 +447,12 @@ fn shapes_have_paths() {
     assert_eq!(parse_iso("2024-02-03T04:05:06Z"), Some((2024, 2, 3, 4, 5, 6)));
     assert_eq!(parse_iso("garbage"), None);
     assert_eq!(civil(0), (1970, 1, 1, 0, 0, 0));
+    // Past chrono's ±262143-year range `civil` keeps the proleptic Gregorian date the old
+    // hand-rolled converter gave (only the caller's 0..=9999 PDF year clamp applies later), rather
+    // than falling back to the epoch. Values pinned from the old formula.
+    assert_eq!(civil(10_000_000_000_000), (318857, 5, 20, 17, 46, 40));
+    assert_eq!(civil(-10_000_000_000_000), (-314918, 8, 13, 6, 13, 20));
+    assert_eq!(civil(253_402_300_800), (10000, 1, 1, 0, 0, 0));
 }
 
 #[test]

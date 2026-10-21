@@ -94,14 +94,37 @@ fn matches(name: &str, target: &str) -> bool {
     }
 }
 
-/// `2026-10-08T07:59:17.728Z` (UTC, milliseconds). A clock before 1970, or past the last date
-/// chrono can represent (year 262143), reads as the epoch, so logging never panics.
+/// `2026-10-08T07:59:17.728Z` (UTC, milliseconds). A clock before 1970 reads as the epoch (the
+/// `duration_since` clamp); past the last date chrono can represent (year 262143) the proleptic
+/// Gregorian date is kept via the 400-year cycle rather than falling back to the epoch, so the
+/// output never changes for a value the old formatter accepted and logging never panics.
 pub fn timestamp(t: SystemTime) -> String {
-    use chrono::Datelike;
     let since = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let t = i64::try_from(since.as_secs()).ok().and_then(|s| chrono::DateTime::from_timestamp(s, since.subsec_nanos())).unwrap_or_default();
-    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
-    format!("{:04}-{}", t.year(), t.format("%m-%dT%H:%M:%S%.3fZ"))
+    let secs = since.as_secs();
+    let (days, rem) = (secs / 86_400, secs % 86_400);
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z", rem / 3600, rem % 3600 / 60, rem % 60, since.subsec_millis())
+}
+
+/// Days since 1970-01-01 → proleptic Gregorian (year, month, day).
+///
+/// `timestamp` clamps a pre-1970 clock to the epoch, so `days` is an unsigned count that can run
+/// past `NaiveDate`'s ±262143-year range. The Gregorian calendar repeats every 400 years
+/// (146_097 days), so chrono converts the day within one cycle and whole cycles go back into the
+/// year (an `i128`, then saturated into `i64`), keeping chrono as the only calendar logic and
+/// reproducing the old `civil_from_days` result exactly without hand-rolled day math. 1970-01-01
+/// is `num_days_from_ce` 719_163.
+fn civil_from_days(days: u64) -> (i64, u32, u32) {
+    use chrono::Datelike;
+    let (cycles, rest) = (days / 146_097, days % 146_097);
+    // `rest + 719_163` is 719_163..865_259, always a valid CE day.
+    match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => {
+            let y = i128::from(d.year()) + i128::from(cycles) * 400;
+            (i64::try_from(y).unwrap_or(i64::MAX), d.month(), d.day())
+        }
+        None => (1970, 1, 1), // unreachable
+    }
 }
 
 fn numbered(dir: &Path, n: usize) -> PathBuf {
@@ -420,12 +443,15 @@ mod tests {
         // 2000 is a leap year (divisible by 400), 2100 is not.
         assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(951_782_400)), "2000-02-29T00:00:00.000Z");
         assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(4_107_542_400)), "2100-03-01T00:00:00.000Z");
-        // Before the epoch (a clock set wrong) clamps instead of panicking.
+        // Before the epoch (a clock set wrong) clamps to the epoch instead of panicking.
         assert_eq!(timestamp(UNIX_EPOCH - Duration::from_secs(5)), "1970-01-01T00:00:00.000Z");
-        // Past chrono's range (a clock set absurdly far ahead) reads as the epoch instead of panicking.
-        // Windows' SystemTime can't hold this instant, so it is only checked where it exists.
+        // Past chrono's range (a clock set absurdly far ahead) keeps the proleptic Gregorian date
+        // the old formatter gave, rather than falling back to the epoch. FredApps' counterexample:
+        // UNIX_EPOCH + 10_000_000_000_000 s was 318857-05-20T17:46:40.000Z and must stay so.
+        assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(10_000_000_000_000)), "318857-05-20T17:46:40.000Z");
+        // Windows' SystemTime can't hold u64::MAX / 2 seconds, so it is only checked where it exists.
         if let Some(far) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::MAX / 2)) {
-            assert_eq!(timestamp(far), "1970-01-01T00:00:00.000Z");
+            assert_eq!(timestamp(far), "292277026596-12-04T15:30:07.000Z");
         }
         // Years past 9999 keep the plain zero-padded year (no `+`).
         assert_eq!(timestamp(UNIX_EPOCH + Duration::from_secs(253_402_300_800)), "10000-01-01T00:00:00.000Z");

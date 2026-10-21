@@ -792,10 +792,13 @@ fn join_deleted_marks(blocks: &[FBlock]) -> Option<(Vec<FBlock>, HashMap<usize, 
 
 /// Now, as an `xsd:dateTime` (UTC).
 fn now_iso() -> String {
-    use chrono::Datelike;
-    let t = chrono::DateTime::from_timestamp(now_unix(), 0).unwrap_or_default();
-    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
-    format!("{:04}-{}", t.year(), t.format("%m-%dT%H:%M:%SZ"))
+    let t = now_unix();
+    let (days, secs) = (t.div_euclid(86_400), t.rem_euclid(86_400));
+    // Reuse the crate's 400-year-cycle converter (chrono within a cycle, cycles carried in the
+    // year) so a clock past chrono's range keeps the proleptic Gregorian date the old hand-rolled
+    // code gave, never the epoch. `{y:04}` rather than `%Y`, which writes a `+` before year 10000.
+    let (y, m, d) = crate::sheet::civil(days);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", secs / 3600, secs / 60 % 60, secs % 60)
 }
 
 /// Seconds since the Unix epoch: the system clock, or the browser's on the web.
