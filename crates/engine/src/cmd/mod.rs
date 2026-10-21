@@ -420,9 +420,8 @@ fn split_para_as(s: &mut Session, at: &Pos, enter: bool) -> Result<Pos, CmdError
 
 /// ISO-8601 timestamp (UTC, seconds) for `secs` since the Unix epoch.
 pub fn iso_from_unix_secs(secs: u64) -> String {
-    let (y, m, d) = civil_from_days((secs / 86_400) as i64);
-    let t = secs % 86_400;
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", t / 3600, t / 60 % 60, t % 60)
+    let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
+    t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 /// Seconds since the Unix epoch (UTC): the system clock, or the browser's on the web.
@@ -445,8 +444,19 @@ pub fn now_iso() -> String {
     iso_from_unix_secs(now_unix())
 }
 
-/// Days since 1970-01-01 → (year, month, day) (Howard Hinnant's algorithm).
+/// Days since 1970-01-01 → (year, month, day).
 pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    // `NaiveDate` counts from 0001-01-01 (day 1); day 719_162 is 1970-01-01.
+    match z.checked_add(719_163).and_then(|n| i32::try_from(n).ok()).and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => (i64::from(chrono::Datelike::year(&d)), chrono::Datelike::month(&d), chrono::Datelike::day(&d)),
+        // Out of chrono's range (year 0 or > 262143): keep the proleptic Gregorian answer the
+        // old algorithm gave, computed without a date type.
+        None => civil_fallback(z),
+    }
+}
+
+/// Days since 1970-01-01 → (year, month, day) for values outside `NaiveDate`'s range.
+fn civil_fallback(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097;

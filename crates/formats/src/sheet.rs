@@ -758,6 +758,15 @@ fn serial_date(serial: f64, date1904: bool, kind: DateKind) -> Option<String> {
 
 /// Days since 1970-01-01 to a proleptic Gregorian (year, month, day).
 fn civil(z: i64) -> (i64, i64, i64) {
+    // `NaiveDate` counts from 0001-01-01 (num_days_from_ce 1); 1970-01-01 is 719_163.
+    match z.checked_add(719_163).and_then(|n| i32::try_from(n).ok()).and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => (i64::from(chrono::Datelike::year(&d)), i64::from(chrono::Datelike::month(&d)), i64::from(chrono::Datelike::day(&d))),
+        None => civil_fallback(z),
+    }
+}
+
+/// [`civil`] for values outside `NaiveDate`'s range (Howard Hinnant's algorithm).
+fn civil_fallback(z: i64) -> (i64, i64, i64) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

@@ -803,9 +803,23 @@ fn excel_stamp(serial: f64, date1904: bool) -> Option<Stamp> {
     Some(Stamp { y, m, d, weekday: (day - 1).rem_euclid(7) as u32, secs })
 }
 
-/// Calendar date (year, month, day) of day `n` counted from 30 December 1899 (Howard Hinnant's
-/// civil-from-days algorithm).
+/// Calendar date (year, month, day) of day `n` counted from 30 December 1899 (an Excel serial
+/// day number). Serial `n` is `n - 25_569` days from 1970-01-01.
 fn civil(n: i64) -> (i64, u32, u32) {
+    // `NaiveDate` counts from 0001-01-01 (num_days_from_ce 1); 1970-01-01 is 719_163.
+    match n
+        .checked_sub(25_569)
+        .and_then(|d| d.checked_add(719_163))
+        .and_then(|d| i32::try_from(d).ok())
+        .and_then(chrono::NaiveDate::from_num_days_from_ce_opt)
+    {
+        Some(date) => (i64::from(chrono::Datelike::year(&date)), chrono::Datelike::month(&date), chrono::Datelike::day(&date)),
+        None => civil_fallback(n),
+    }
+}
+
+/// [`civil`] for serials outside `NaiveDate`'s range (Howard Hinnant's algorithm).
+fn civil_fallback(n: i64) -> (i64, u32, u32) {
     let z = n - 25_569 + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

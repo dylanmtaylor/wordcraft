@@ -123,16 +123,31 @@ pub fn parse_date(t: &str) -> Option<(i64, u32, u32)> {
 }
 
 pub fn days_in_month(y: i64, m: u32) -> u32 {
-    match m {
-        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
+    // The length of a month is the day before the first of the next month. `NaiveDate` covers
+    // every year `parse_date` accepts (1..=9999); fall back to the leap-year rule outside it.
+    let first = |y: i64, m: u32| i32::try_from(y).ok().and_then(|y| chrono::NaiveDate::from_ymd_opt(y, m, 1));
+    match (first(y, m), if m == 12 { first(y + 1, 1) } else { first(y, m + 1) }) {
+        (Some(a), Some(b)) => u32::try_from((b - a).num_days()).unwrap_or(31),
+        _ => match m {
+            2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        },
     }
 }
 
 /// Days since 1970-01-01 for a date (inverse of [`super::civil_from_days`]).
 pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    // `NaiveDate` counts from 0001-01-01 (num_days_from_ce 1); 1970-01-01 is 719_163.
+    match i32::try_from(y).ok().and_then(|y| chrono::NaiveDate::from_ymd_opt(y, m, d)) {
+        Some(date) => i64::from(chrono::Datelike::num_days_from_ce(&date)) - 719_163,
+        None => days_from_civil_fallback(y, m, d),
+    }
+}
+
+/// [`days_from_civil`] for dates outside `NaiveDate`'s range (Howard Hinnant's algorithm).
+fn days_from_civil_fallback(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;
