@@ -258,7 +258,9 @@ mod tests {
     fn an_instant_cancel_retries_then_falls_back() {
         let quick = Duration::from_millis(200);
         let slow_cancel = || async {
-            std::thread::sleep(Duration::from_millis(250));
+            // The test polls this future by hand, with no async runtime, so a blocking sleep
+            // models a slow portal response.
+            std::thread::sleep(Duration::from_millis(250)); // NOSONAR
             Vec::<u8>::new()
         };
         assert_eq!(pick(async { vec![1u8] }, async { vec![2] }, quick), Ok(vec![1]));
