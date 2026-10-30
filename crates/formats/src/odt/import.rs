@@ -49,12 +49,16 @@ impl Pictures {
             return None;
         }
         let f = z.by_name(name).ok()?;
-        if f.size() > room {
+        let declared = f.size();
+        if declared > room {
             return None;
         }
         let mut out = Vec::new();
         let read = f.take(room.saturating_add(1)).read_to_end(&mut out);
-        self.room = room.saturating_sub(out.len() as u64);
+        // A failed read reports none of the bytes it inflated (zip 9 inflates up to the declared
+        // size before refusing a larger entry), so it is charged what it declared, at least.
+        let spent = if read.is_ok() { out.len() as u64 } else { (out.len() as u64).max(declared) };
+        self.room = room.saturating_sub(spent);
         (read.is_ok() && out.len() as u64 <= room).then_some(out)
     }
 }
